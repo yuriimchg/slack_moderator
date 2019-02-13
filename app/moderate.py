@@ -1,48 +1,62 @@
-from datetime import datetime, timedelta
+from datetime import timedelta, datetime
 import os
-from app import app
 
 
-# All users must post
-# All posts should have at least N the same reactions last week
-# If today is [day], select all users and check their posts reactions
-# If some user did not post, [action] him
+def get_date(unix_date):
+    unix_date = float(unix_date)
+    return datetime.fromtimestamp(unix_date)
 
 
-class User:
-
-    def __init__(self, name, list_of_posts):
-        self.name = name
-        self.posts = list_of_posts
-
-    def has_enough_reactions(self, min_count):
-        # Loop through the posts
-        # If there is more, than min_count, exact reactions
-        return True
-
-    def kick(self):
-        if not self.has_enough_reactions():
-            # WTF bot kick user
-            pass
+def last_7_days_(posts):
+    start_date = datetime.now() - timedelta(days=7)
+    return list(filter(lambda x: get_date(x['ts']) > start_date, posts))
 
 
-def today_is_monday():
-    if datetime.now().weekday() == 0:
-        return True
+def count_reactions(posts, id_to_name):
+    d = {}
+    posts = last_7_days_(posts)
+    for post in posts:
+        author = get_name(id_to_name, post['user'])
+        if 'reactions' in post.keys():
+            max_reactions = max(p['count'] for p in post['reactions'])
+        else: max_reactions = 0
+        if author not in d.keys() or d[author] < max_reactions:
+            d[author] = max_reactions
+    return dict(sorted(d.items(), key=lambda x: x[1]))
 
 
-def today_is_friday():
-    if datetime.now().weekday() == 4:
-        return True
+def check_who_did_not_post(members, posts, id_to_name):
+    black_list = []
+    posts = last_7_days_(posts)
+    users_posted = count_reactions(posts, id_to_name)
+    for member in members:
+        member = get_name(id_to_name, member)
+        if member not in users_posted.keys():
+            black_list.append(member)
+    return black_list
 
 
-def send_notification(people, event):
-    if today_is_friday():
-        pass
-
-def kick_the_violator():
-    """ Drop not interesting users """
-
-    pass
+def get_name(id_to_name, uid):
+    name_list = id_to_name[uid]
+    return name_list
 
 
+def create_message(not_posted, reactions_dict):
+    black_list = []
+    if len(not_posted) > 1:
+        not_posted_text = f'{len(not_posted)} users did not post anything:\n {", ".join(not_posted[:-1])} and {not_posted[-1]}'
+    if len(not_posted) == 1:
+        not_posted_text = f'Only {not_posted} did not post anything.'
+    if len(not_posted) < 1:
+        not_posted_text = f'Everyone posted last week.'
+
+    for user, reaction in reactions_dict.items():
+        if reaction < 3:
+            black_list.append(user)
+    weak_users_msg = f'These users worth posting to #random only: {", ".join(black_list)}. They should be excluded from wtf immediately!'
+
+    return not_posted_text + '\n' + weak_users_msg
+
+
+def send_report(client, message, receiver):
+    client.api_call('chat.postMessage', channel=receiver, text=message)
